@@ -6,6 +6,8 @@ import org.springframework.data.elasticsearch.annotations.DateFormat;
 import org.springframework.data.elasticsearch.annotations.Document;
 import org.springframework.data.elasticsearch.annotations.Field;
 import org.springframework.data.elasticsearch.annotations.FieldType;
+import org.springframework.data.elasticsearch.annotations.InnerField;
+import org.springframework.data.elasticsearch.annotations.MultiField;
 
 import java.time.OffsetDateTime;
 
@@ -62,8 +64,11 @@ public class SecurityEventDocument {
     private String hostname;
 
     // Analysed for full-text search (attackers probe many path variants), plus a raw
-    // keyword sub-field for exact filtering/aggregation.
-    @Field(type = FieldType.Text)
+    // keyword sub-field ("path.keyword") for exact filtering and terms aggregations
+    // (e.g. topTargetedPaths in the stats API), which cannot run on analysed text.
+    @MultiField(
+            mainField = @Field(type = FieldType.Text),
+            otherFields = @InnerField(suffix = "keyword", type = FieldType.Keyword))
     private String path;
 
     @Field(type = FieldType.Keyword)
