@@ -30,6 +30,12 @@ import java.util.List;
  * {@link SecurityEventValidator}; a request is accepted only if <em>all</em> of its
  * events are valid (all-or-nothing), at which point each event is stamped with the
  * server-side {@code receivedAt} timestamp and handed to the {@link EventPublisher}.
+ *
+ * <p>The controller is deliberately decoupled from the downstream Enrichment stage: it
+ * depends only on the transport-agnostic {@link EventPublisher} interface and has no
+ * knowledge of the underlying messaging (Spring events today, Kafka in the target
+ * architecture). Enrichment happens asynchronously off the request thread, so ingestion
+ * responds as soon as events are published.
  */
 @RestController
 @RequestMapping("/v1/events")
@@ -80,11 +86,15 @@ public class IngestionController {
                     "One or more events failed validation; no events were accepted", failures));
         }
 
-        // All valid: stamp server receive time and publish.
+        // All valid: stamp server receive time and hand off to the transport-agnostic
+        // publisher. The controller depends only on the EventPublisher interface and is
+        // unaware whether the underlying transport is Spring events (today) or Kafka
+        // (future) — decoupling the Ingestion API from the Enrichment stage.
         OffsetDateTime receivedAt = OffsetDateTime.now();
         for (SecurityEvent event : events) {
             publisher.publish(event.withReceivedAt(receivedAt));
         }
+        log.info("Accepted and published {} event(s) to internal queue", events.size());
 
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(new IngestionResponse(events.size(), "Events accepted"));

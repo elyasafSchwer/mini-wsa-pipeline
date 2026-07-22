@@ -122,7 +122,8 @@ class SecurityEventValidatorTest {
                 null, null, null, "policy-1", null, null, null, null, null,
                 "ua", 10L, 20L, null,
                 new Rule("r-1", "SQLi", "msg", Severity.HIGH, "NOPE", Action.DENY),
-                new GeoLocation("US", "NYC"));
+                new GeoLocation("US", "NYC"),
+                null, null);
 
         ValidationResult result = validator.validate(event);
 
@@ -151,6 +152,7 @@ class SecurityEventValidatorTest {
                 1024L,
                 null,
                 new Rule("rule-99", "SQL Injection", "blocked SQLi", Severity.CRITICAL, "INJECTION", Action.DENY),
-                new GeoLocation("US", "New York"));
+                new GeoLocation("US", "New York"),
+                null, null);
     }
 }

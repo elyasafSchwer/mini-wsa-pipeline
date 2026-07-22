@@ -30,3 +30,24 @@ wsa:
       DENY: 20
       ALERT: 10
       MONITOR: 0
+
+    # Threat-scoring tunables applied during enrichment.
+    scoring:
+      # Extra points when the request targets a sensitive path (see sensitive-paths).
+      sensitive-path-bonus: 15
+      # Extra points when the client IP is flagged as a repeat offender.
+      repeat-offender-bonus: 15
+      # Hard cap on the final threat score.
+      max-score: 100
+      # Path fragments considered sensitive (case-insensitive "contains" match).
+      sensitive-paths:
+        - /admin
+        - /login
+
+    # Sliding-window rate limiting per client IP (Redis-backed).
+    rate-limit:
+      # Length of the sliding window.
+      window: 10m
+      # An IP is a repeat offender when its event count within the window exceeds this.
+      threshold: 5
+

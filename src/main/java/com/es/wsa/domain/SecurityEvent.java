@@ -6,9 +6,16 @@ import java.time.OffsetDateTime;
  * A single web security event ingested by the WSA pipeline.
  *
  * <p>Modelled as an immutable record so it maps cleanly to/from JSON via Jackson and is
- * safe to hand off to downstream publishers without defensive copying. All fields except
- * {@code receivedAt} originate from the client payload; {@code receivedAt} is stamped by
- * the server on ingestion (see {@link #withReceivedAt(OffsetDateTime)}).
+ * safe to hand off to downstream publishers without defensive copying. Fields fall into
+ * three groups by origin:
+ * <ul>
+ *   <li>Client payload — everything from {@code eventId} through {@code geoLocation}.</li>
+ *   <li>Server ingestion — {@code receivedAt}, stamped on arrival
+ *       (see {@link #withReceivedAt(OffsetDateTime)}).</li>
+ *   <li>Enrichment — {@code attackType} and {@code threatScore}, populated by the
+ *       enrichment stage (see {@link #withAttackType(String)} /
+ *       {@link #withThreatScore(Integer)}).</li>
+ * </ul>
  *
  * @param eventId      client-supplied unique event identifier
  * @param timestamp    time the event occurred at the edge
@@ -25,6 +32,10 @@ import java.time.OffsetDateTime;
  * @param receivedAt   server-side ingestion timestamp (set by the server, not the client)
  * @param rule         the security rule that matched
  * @param geoLocation  geographic origin of the client, may be {@code null}
+ * @param attackType   human-readable attack type derived from {@code rule.category}
+ *                     during enrichment, may be {@code null} before enrichment
+ * @param threatScore  computed risk score (0–100) assigned during enrichment,
+ *                     may be {@code null} before enrichment
  */
 public record SecurityEvent(
         String eventId,
@@ -41,7 +52,9 @@ public record SecurityEvent(
         Long responseSize,
         OffsetDateTime receivedAt,
         Rule rule,
-        GeoLocation geoLocation
+        GeoLocation geoLocation,
+        String attackType,
+        Integer threatScore
 ) {
 
     /**
@@ -55,7 +68,8 @@ public record SecurityEvent(
     public SecurityEvent withReceivedAt(OffsetDateTime receivedAt) {
         return new SecurityEvent(
                 eventId, timestamp, configId, policyId, clientIp, hostname, path, method,
-                statusCode, userAgent, requestSize, responseSize, receivedAt, rule, geoLocation
+                statusCode, userAgent, requestSize, responseSize, receivedAt, rule, geoLocation,
+                attackType, threatScore
         );
     }
 
@@ -68,7 +82,8 @@ public record SecurityEvent(
     public SecurityEvent withEventId(String eventId) {
         return new SecurityEvent(
                 eventId, timestamp, configId, policyId, clientIp, hostname, path, method,
-                statusCode, userAgent, requestSize, responseSize, receivedAt, rule, geoLocation
+                statusCode, userAgent, requestSize, responseSize, receivedAt, rule, geoLocation,
+                attackType, threatScore
         );
     }
 
@@ -81,7 +96,36 @@ public record SecurityEvent(
     public SecurityEvent withRule(Rule rule) {
         return new SecurityEvent(
                 eventId, timestamp, configId, policyId, clientIp, hostname, path, method,
-                statusCode, userAgent, requestSize, responseSize, receivedAt, rule, geoLocation
+                statusCode, userAgent, requestSize, responseSize, receivedAt, rule, geoLocation,
+                attackType, threatScore
+        );
+    }
+
+    /**
+     * Returns a copy of this event with the enrichment-derived {@code attackType} set.
+     *
+     * @param attackType the human-readable attack type
+     * @return a new {@link SecurityEvent} with the given attack type
+     */
+    public SecurityEvent withAttackType(String attackType) {
+        return new SecurityEvent(
+                eventId, timestamp, configId, policyId, clientIp, hostname, path, method,
+                statusCode, userAgent, requestSize, responseSize, receivedAt, rule, geoLocation,
+                attackType, threatScore
+        );
+    }
+
+    /**
+     * Returns a copy of this event with the enrichment-derived {@code threatScore} set.
+     *
+     * @param threatScore the computed risk score (0–100)
+     * @return a new {@link SecurityEvent} with the given threat score
+     */
+    public SecurityEvent withThreatScore(Integer threatScore) {
+        return new SecurityEvent(
+                eventId, timestamp, configId, policyId, clientIp, hostname, path, method,
+                statusCode, userAgent, requestSize, responseSize, receivedAt, rule, geoLocation,
+                attackType, threatScore
         );
     }
 }

@@ -5,3 +5,18 @@ spring:
   # file stays limited to server/spring/infrastructure concerns.
   config:
     import: classpath:wsa-policies.yml
+  # Redis backs the per-IP sliding-window rate tracker. Overridable via the standard
+  # SPRING_DATA_REDIS_* environment variables in each environment.
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+  # Elasticsearch backs long-term storage of enriched events (index: security-events).
+  # Local dev target is an unsecured single-node ES 8.x on localhost:9200 (see
+  # docker-compose.yml). No credentials/TLS here since xpack.security is disabled; in
+  # secured environments set SPRING_ELASTICSEARCH_URIS plus username/password/SSL.
+  elasticsearch:
+    uris: ${ELASTICSEARCH_URIS:http://localhost:9200}
+    connection-timeout: 2s
+    socket-timeout: 5s
