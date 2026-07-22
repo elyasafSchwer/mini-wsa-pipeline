@@ -1,0 +1,32 @@
+# Web Security Analytics business policies.
+#
+# Kept separate from application.yml (imported via spring.config.import) so the security
+# vocabulary and scoring model can be tuned/reviewed independently of infrastructure
+# config. Bound at startup by WsaPolicyProperties (@ConfigurationProperties prefix
+# "wsa.policies"). All entries are key-value maps so keys drive validation while values
+# carry human-readable names / numeric scores.
+wsa:
+  policies:
+    # Allowed attack categories: canonical key -> display name. The KEYS are the
+    # authoritative vocabulary the validator checks rule.category against.
+    categories:
+      INJECTION: "SQL/Command Injection"
+      XSS: "Cross-Site Scripting"
+      PROTOCOL_VIOLATION: "Protocol Anomaly"
+      DATA_LEAKAGE: "Data Exfiltration"
+      BOT: "Bot Activity"
+      DOS: "Denial of Service"
+      RATE_LIMIT: "Rate Limiting"
+
+    # Severity -> risk score contribution.
+    severity-scores:
+      CRITICAL: 40
+      HIGH: 30
+      MEDIUM: 20
+      LOW: 10
+
+    # Enforcement action -> risk score contribution.
+    action-scores:
+      DENY: 20
+      ALERT: 10
+      MONITOR: 0

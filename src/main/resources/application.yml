@@ -1,0 +1,7 @@
+spring:
+  application:
+    name: MiniWSA
+  # Business rules (attack categories, scoring) live in a dedicated policy file so this
+  # file stays limited to server/spring/infrastructure concerns.
+  config:
+    import: classpath:wsa-policies.yml
