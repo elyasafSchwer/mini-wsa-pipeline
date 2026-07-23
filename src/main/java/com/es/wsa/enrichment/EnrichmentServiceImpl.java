@@ -80,7 +80,7 @@ public class EnrichmentServiceImpl implements EventProcessor {
             score += scoring.sensitivePathBonus();
         }
 
-        if (rateTracker.recordAndCheckExceeded(event.clientIp(), event.eventId())) {
+        if (rateTracker.recordAndCheckExceeded(event.clientIp(), event.eventId(), event.timestamp())) {
             score += scoring.repeatOffenderBonus();
         }
 

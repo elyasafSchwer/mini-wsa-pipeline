@@ -17,6 +17,7 @@ import java.time.OffsetDateTime;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -52,7 +53,7 @@ class EnrichmentServiceImplTest {
 
     @Test
     void mapsCategoryToAttackTypeDisplayName() {
-        when(rateTracker.recordAndCheckExceeded(anyString(), anyString())).thenReturn(false);
+        when(rateTracker.recordAndCheckExceeded(anyString(), anyString(), any())).thenReturn(false);
 
         SecurityEvent enriched = enrichmentService.process(
                 event("/api/data", Severity.LOW, Action.MONITOR, "INJECTION"));
@@ -62,7 +63,7 @@ class EnrichmentServiceImplTest {
 
     @Test
     void fallsBackToRawCategoryWhenNoDisplayNameConfigured() {
-        when(rateTracker.recordAndCheckExceeded(anyString(), anyString())).thenReturn(false);
+        when(rateTracker.recordAndCheckExceeded(anyString(), anyString(), any())).thenReturn(false);
 
         SecurityEvent enriched = enrichmentService.process(
                 event("/api/data", Severity.LOW, Action.MONITOR, "BOT"));
@@ -72,7 +73,7 @@ class EnrichmentServiceImplTest {
 
     @Test
     void computesBaseScoreFromSeverityAndAction() {
-        when(rateTracker.recordAndCheckExceeded(anyString(), anyString())).thenReturn(false);
+        when(rateTracker.recordAndCheckExceeded(anyString(), anyString(), any())).thenReturn(false);
 
         // HIGH(30) + ALERT(10), non-sensitive path, not repeat offender = 40
         SecurityEvent enriched = enrichmentService.process(
@@ -83,7 +84,7 @@ class EnrichmentServiceImplTest {
 
     @Test
     void addsBonusForAdminPath() {
-        when(rateTracker.recordAndCheckExceeded(anyString(), anyString())).thenReturn(false);
+        when(rateTracker.recordAndCheckExceeded(anyString(), anyString(), any())).thenReturn(false);
 
         // MEDIUM(20) + MONITOR(0) + /admin(15) = 35
         SecurityEvent enriched = enrichmentService.process(
@@ -94,7 +95,7 @@ class EnrichmentServiceImplTest {
 
     @Test
     void addsBonusForLoginPath() {
-        when(rateTracker.recordAndCheckExceeded(anyString(), anyString())).thenReturn(false);
+        when(rateTracker.recordAndCheckExceeded(anyString(), anyString(), any())).thenReturn(false);
 
         // LOW(10) + ALERT(10) + /login(15) = 35
         SecurityEvent enriched = enrichmentService.process(
@@ -105,7 +106,7 @@ class EnrichmentServiceImplTest {
 
     @Test
     void doesNotAddPathBonusForNonSensitivePath() {
-        when(rateTracker.recordAndCheckExceeded(anyString(), anyString())).thenReturn(false);
+        when(rateTracker.recordAndCheckExceeded(anyString(), anyString(), any())).thenReturn(false);
 
         // HIGH(30) + DENY(20) = 50, no path bonus
         SecurityEvent enriched = enrichmentService.process(
@@ -116,7 +117,7 @@ class EnrichmentServiceImplTest {
 
     @Test
     void addsBonusForRepeatOffender() {
-        when(rateTracker.recordAndCheckExceeded(anyString(), anyString())).thenReturn(true);
+        when(rateTracker.recordAndCheckExceeded(anyString(), anyString(), any())).thenReturn(true);
 
         // HIGH(30) + ALERT(10) + repeat offender(15) = 55
         SecurityEvent enriched = enrichmentService.process(
@@ -127,7 +128,7 @@ class EnrichmentServiceImplTest {
 
     @Test
     void doesNotAddRepeatOffenderBonusWhenNotExceeded() {
-        when(rateTracker.recordAndCheckExceeded(anyString(), anyString())).thenReturn(false);
+        when(rateTracker.recordAndCheckExceeded(anyString(), anyString(), any())).thenReturn(false);
 
         // HIGH(30) + ALERT(10) = 40, no repeat-offender bonus
         SecurityEvent enriched = enrichmentService.process(
@@ -138,7 +139,7 @@ class EnrichmentServiceImplTest {
 
     @Test
     void combinesAllBonuses() {
-        when(rateTracker.recordAndCheckExceeded(anyString(), anyString())).thenReturn(true);
+        when(rateTracker.recordAndCheckExceeded(anyString(), anyString(), any())).thenReturn(true);
 
         // CRITICAL(50) + DENY(20) + /admin(15) + repeat offender(15) = 100
         SecurityEvent enriched = enrichmentService.process(
@@ -149,7 +150,7 @@ class EnrichmentServiceImplTest {
 
     @Test
     void capsScoreAtOneHundred() {
-        when(rateTracker.recordAndCheckExceeded(anyString(), anyString())).thenReturn(true);
+        when(rateTracker.recordAndCheckExceeded(anyString(), anyString(), any())).thenReturn(true);
 
         // CRITICAL(50) + DENY(20) + /admin(15) + repeat(15) = 115 -> capped to 100.
         // (/admin/login also contains /login, but the path bonus is applied once.)
@@ -160,18 +161,20 @@ class EnrichmentServiceImplTest {
     }
 
     @Test
-    void consultsRateTrackerWithClientIpAndEventId() {
-        when(rateTracker.recordAndCheckExceeded(anyString(), anyString())).thenReturn(false);
+    void consultsRateTrackerWithClientIpEventIdAndEventTime() {
+        when(rateTracker.recordAndCheckExceeded(anyString(), anyString(), any())).thenReturn(false);
 
         enrichmentService.process(event("/api/data", Severity.LOW, Action.MONITOR, "XSS"));
 
-        // The eventId must be passed through as the dedup member so retries stay idempotent.
-        verify(rateTracker).recordAndCheckExceeded("203.0.113.7", "evt-1");
+        // clientIp + eventId (idempotent dedup member) + the event's own timestamp
+        // (event-time window anchor) must all be passed through.
+        verify(rateTracker).recordAndCheckExceeded(
+                "203.0.113.7", "evt-1", OffsetDateTime.parse("2026-07-22T10:15:30+00:00"));
     }
 
     @Test
     void preservesOriginalFields() {
-        when(rateTracker.recordAndCheckExceeded(anyString(), anyString())).thenReturn(false);
+        when(rateTracker.recordAndCheckExceeded(anyString(), anyString(), any())).thenReturn(false);
 
         SecurityEvent original = event("/api/data", Severity.HIGH, Action.DENY, "XSS");
         SecurityEvent enriched = enrichmentService.process(original);

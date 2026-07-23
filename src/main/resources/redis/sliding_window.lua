@@ -1,8 +1,12 @@
 -- Atomic sliding-window rate check for a single client IP.
 --
+-- The window is anchored on EVENT TIME (the event's own timestamp), not the server's
+-- processing time, so late-arriving events and client backlogs are placed correctly on
+-- the timeline and do not cause false repeat-offender positives.
+--
 -- KEYS[1] = the ZSET key (e.g. "ip_events:1.2.3.4")
--- ARGV[1] = current epoch time in milliseconds (score for the new member)
--- ARGV[2] = window start cutoff in ms (entries with score < cutoff are evicted)
+-- ARGV[1] = event time in milliseconds (the event's own timestamp; score for the new member)
+-- ARGV[2] = event time minus window size, in ms (entries with score < cutoff are evicted)
 -- ARGV[3] = the event's unique id, used as the member value. Using the event id
 --           (rather than a fresh random value) makes reprocessing idempotent: a retry
 --           of the same event re-adds the same member, so ZADD updates its score
