@@ -203,6 +203,7 @@ class EnrichmentServiceImplTest {
                 new Rule("rule-99", "Test Rule", "msg", severity, category, action),
                 new GeoLocation("US", "New York"),
                 null,
-                null);
+                null,
+                false);
     }
 }

@@ -76,6 +76,6 @@ class SecurityEventConsumerTest {
     private static SecurityEvent sampleEvent(String id) {
         return new SecurityEvent(
                 id, null, 1L, "p", "203.0.113.7", "h", "/x", "GET", 200,
-                "ua", 1L, 1L, null, null, null, null, null);
+                "ua", 1L, 1L, null, null, null, null, null, false);
     }
 }

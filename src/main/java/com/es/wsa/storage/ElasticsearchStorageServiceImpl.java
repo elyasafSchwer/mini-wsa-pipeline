@@ -78,6 +78,7 @@ public class ElasticsearchStorageServiceImpl implements EventStorageService {
 
         doc.setAttackType(event.attackType());
         doc.setThreatScore(event.threatScore());
+        doc.setRepeatOffender(event.repeatOffender());
 
         return doc;
     }

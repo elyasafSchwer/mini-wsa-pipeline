@@ -36,6 +36,9 @@ import java.time.OffsetDateTime;
  *                     during enrichment, may be {@code null} before enrichment
  * @param threatScore  computed risk score (0–100) assigned during enrichment,
  *                     may be {@code null} before enrichment
+ * @param repeatOffender {@code true} when the repeat-offender bonus was applied to
+ *                     {@code threatScore} during enrichment because the client IP exceeded
+ *                     the rate-limit threshold; {@code false} before enrichment
  */
 public record SecurityEvent(
         String eventId,
@@ -54,7 +57,8 @@ public record SecurityEvent(
         Rule rule,
         GeoLocation geoLocation,
         String attackType,
-        Integer threatScore
+        Integer threatScore,
+        boolean repeatOffender
 ) {
 
     /**
@@ -69,7 +73,7 @@ public record SecurityEvent(
         return new SecurityEvent(
                 eventId, timestamp, configId, policyId, clientIp, hostname, path, method,
                 statusCode, userAgent, requestSize, responseSize, receivedAt, rule, geoLocation,
-                attackType, threatScore
+                attackType, threatScore, repeatOffender
         );
     }
 
@@ -83,7 +87,7 @@ public record SecurityEvent(
         return new SecurityEvent(
                 eventId, timestamp, configId, policyId, clientIp, hostname, path, method,
                 statusCode, userAgent, requestSize, responseSize, receivedAt, rule, geoLocation,
-                attackType, threatScore
+                attackType, threatScore, repeatOffender
         );
     }
 
@@ -97,7 +101,7 @@ public record SecurityEvent(
         return new SecurityEvent(
                 eventId, timestamp, configId, policyId, clientIp, hostname, path, method,
                 statusCode, userAgent, requestSize, responseSize, receivedAt, rule, geoLocation,
-                attackType, threatScore
+                attackType, threatScore, repeatOffender
         );
     }
 
@@ -111,7 +115,7 @@ public record SecurityEvent(
         return new SecurityEvent(
                 eventId, timestamp, configId, policyId, clientIp, hostname, path, method,
                 statusCode, userAgent, requestSize, responseSize, receivedAt, rule, geoLocation,
-                attackType, threatScore
+                attackType, threatScore, repeatOffender
         );
     }
 
@@ -125,7 +129,22 @@ public record SecurityEvent(
         return new SecurityEvent(
                 eventId, timestamp, configId, policyId, clientIp, hostname, path, method,
                 statusCode, userAgent, requestSize, responseSize, receivedAt, rule, geoLocation,
-                attackType, threatScore
+                attackType, threatScore, repeatOffender
+        );
+    }
+
+    /**
+     * Returns a copy of this event with the enrichment-derived {@code repeatOffender} flag
+     * set — {@code true} when the repeat-offender bonus was added to the threat score.
+     *
+     * @param repeatOffender whether the client IP was flagged as a repeat offender
+     * @return a new {@link SecurityEvent} with the given repeat-offender flag
+     */
+    public SecurityEvent withRepeatOffender(boolean repeatOffender) {
+        return new SecurityEvent(
+                eventId, timestamp, configId, policyId, clientIp, hostname, path, method,
+                statusCode, userAgent, requestSize, responseSize, receivedAt, rule, geoLocation,
+                attackType, threatScore, repeatOffender
         );
     }
 }

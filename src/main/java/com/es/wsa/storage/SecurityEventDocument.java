@@ -8,6 +8,7 @@ import org.springframework.data.elasticsearch.annotations.Field;
 import org.springframework.data.elasticsearch.annotations.FieldType;
 import org.springframework.data.elasticsearch.annotations.InnerField;
 import org.springframework.data.elasticsearch.annotations.MultiField;
+import org.springframework.data.elasticsearch.annotations.WriteTypeHint;
 
 import java.time.OffsetDateTime;
 
@@ -37,8 +38,12 @@ import java.time.OffsetDateTime;
  *       sub-records are flattened into prefixed scalar fields ({@code rule*}, {@code geo*})
  *       to keep the mapping simple and query-friendly.</li>
  * </ul>
+ *
+ * <p>{@code writeTypeHint = FALSE} suppresses Spring Data's {@code _class} attribute: only
+ * one concrete type is ever stored in this index, so the polymorphic-read hint is just
+ * noise in the persisted document.
  */
-@Document(indexName = "security-events")
+@Document(indexName = "security-events", writeTypeHint = WriteTypeHint.FALSE)
 public class SecurityEventDocument {
 
     /**
@@ -125,6 +130,13 @@ public class SecurityEventDocument {
 
     @Field(type = FieldType.Integer)
     private Integer threatScore;
+
+    /**
+     * {@code true} when the {@code threatScore} includes the repeat-offender bonus because
+     * the client IP exceeded the rate-limit threshold during enrichment.
+     */
+    @Field(type = FieldType.Boolean)
+    private boolean repeatOffender;
 
     /** No-arg constructor required by Spring Data Elasticsearch for read-back mapping. */
     public SecurityEventDocument() {
@@ -312,5 +324,13 @@ public class SecurityEventDocument {
 
     public void setThreatScore(Integer threatScore) {
         this.threatScore = threatScore;
+    }
+
+    public boolean isRepeatOffender() {
+        return repeatOffender;
+    }
+
+    public void setRepeatOffender(boolean repeatOffender) {
+        this.repeatOffender = repeatOffender;
     }
 }

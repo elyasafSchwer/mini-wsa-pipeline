@@ -182,7 +182,8 @@ class StatsAggregationIT {
                 rule,
                 new GeoLocation("US", "NYC"),
                 rule.category(),
-                score);
+                score,
+                false);
     }
 
     /** Cheap liveness probe against the compose ES so the test can skip when it is down. */

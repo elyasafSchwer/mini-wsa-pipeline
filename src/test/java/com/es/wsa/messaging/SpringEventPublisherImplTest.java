@@ -38,6 +38,6 @@ class SpringEventPublisherImplTest {
     private static SecurityEvent sampleEvent(String id, String clientIp) {
         return new SecurityEvent(
                 id, null, 1L, "p", clientIp, "h", "/x", "GET", 200,
-                "ua", 1L, 1L, null, null, null, null, null);
+                "ua", 1L, 1L, null, null, null, null, null, false);
     }
 }

@@ -43,14 +43,21 @@ public class EnrichmentServiceImpl implements EventProcessor {
     @Override
     public SecurityEvent process(SecurityEvent event) {
         String attackType = resolveAttackType(event.rule());
-        int threatScore = computeThreatScore(event);
 
-        log.debug("Enriched event {}: attackType={}, threatScore={}",
-                event.eventId(), attackType, threatScore);
+        // Capture the repeat-offender decision once so it drives both the score bonus and
+        // the persisted flag (the rate tracker must only be consulted a single time per
+        // event — it mutates the sliding-window count).
+        boolean repeatOffender = rateTracker.recordAndCheckExceeded(
+                event.clientIp(), event.eventId(), event.timestamp());
+        int threatScore = computeThreatScore(event, repeatOffender);
+
+        log.debug("Enriched event {}: attackType={}, threatScore={}, repeatOffender={}",
+                event.eventId(), attackType, threatScore, repeatOffender);
 
         return event
                 .withAttackType(attackType)
-                .withThreatScore(threatScore);
+                .withThreatScore(threatScore)
+                .withRepeatOffender(repeatOffender);
     }
 
     /**
@@ -70,8 +77,11 @@ public class EnrichmentServiceImpl implements EventProcessor {
     /**
      * Computes the bounded threat score from severity/action base scores plus the
      * sensitive-path and repeat-offender bonuses.
+     *
+     * @param repeatOffender whether the client IP was flagged as a repeat offender (decided
+     *                       by the caller so the rate tracker is consulted exactly once)
      */
-    private int computeThreatScore(SecurityEvent event) {
+    private int computeThreatScore(SecurityEvent event, boolean repeatOffender) {
         WsaPolicyProperties.Scoring scoring = policies.getScoring();
 
         int score = baseScore(event.rule());
@@ -80,7 +90,7 @@ public class EnrichmentServiceImpl implements EventProcessor {
             score += scoring.sensitivePathBonus();
         }
 
-        if (rateTracker.recordAndCheckExceeded(event.clientIp(), event.eventId(), event.timestamp())) {
+        if (repeatOffender) {
             score += scoring.repeatOffenderBonus();
         }
 
