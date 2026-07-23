@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -94,5 +95,82 @@ class StatsControllerTest {
         return new StatsSummaryResponse(
                 null, new StatsSummaryResponse.TimeRange(null, null), 0L,
                 Map.of(), Map.of(), List.of(), List.of(), 0.0);
+    }
+
+    // --- timeseries ---------------------------------------------------------------------
+
+    @Test
+    void returnsTimeseriesJsonForValidRequest() throws Exception {
+        TimeSeriesResponse sample = new TimeSeriesResponse(
+                14227L,
+                new TimeSeriesResponse.TimeRange("2026-07-22T19:40:00Z", "2026-07-22T19:43:00Z"),
+                "1m",
+                List.of(
+                        new TimeSeriesResponse.Bucket("2026-07-22T19:40:00.000Z", 3L),
+                        new TimeSeriesResponse.Bucket("2026-07-22T19:41:00.000Z", 0L),
+                        new TimeSeriesResponse.Bucket("2026-07-22T19:42:00.000Z", 5L)));
+        when(statsService.timeseries(any(), eq(TimeInterval.M1))).thenReturn(sample);
+
+        mockMvc.perform(get("/v1/stats/timeseries")
+                        .param("configId", "14227")
+                        .param("from", "2026-07-22T19:40:00Z")
+                        .param("to", "2026-07-22T19:43:00Z")
+                        .param("interval", "1m"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.configId").value(14227))
+                .andExpect(jsonPath("$.interval").value("1m"))
+                .andExpect(jsonPath("$.buckets[0].timestamp").value("2026-07-22T19:40:00.000Z"))
+                .andExpect(jsonPath("$.buckets[0].count").value(3))
+                .andExpect(jsonPath("$.buckets[1].count").value(0));
+    }
+
+    @Test
+    void defaultsIntervalToOneMinuteWhenOmitted() throws Exception {
+        when(statsService.timeseries(any(), eq(TimeInterval.M1))).thenReturn(emptySeries());
+
+        mockMvc.perform(get("/v1/stats/timeseries")
+                        .param("from", "2026-07-22T19:40:00Z")
+                        .param("to", "2026-07-22T19:50:00Z"))
+                .andExpect(status().isOk());
+
+        // Interval defaulted to 1m -> M1 passed to the service.
+        verify(statsService).timeseries(any(), eq(TimeInterval.M1));
+    }
+
+    @Test
+    void rejectsUnknownInterval() throws Exception {
+        mockMvc.perform(get("/v1/stats/timeseries")
+                        .param("from", "2026-07-22T19:40:00Z")
+                        .param("to", "2026-07-22T19:50:00Z")
+                        .param("interval", "2m"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").exists());
+
+        verify(statsService, never()).timeseries(any(), any());
+    }
+
+    @Test
+    void rejectsTimeseriesMissingFromOrTo() throws Exception {
+        mockMvc.perform(get("/v1/stats/timeseries").param("to", "2026-07-22T19:50:00Z"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("'from' and 'to' are required for timeseries"));
+
+        verify(statsService, never()).timeseries(any(), any());
+    }
+
+    @Test
+    void rejectsTimeseriesInvertedRange() throws Exception {
+        mockMvc.perform(get("/v1/stats/timeseries")
+                        .param("from", "2026-07-22T19:50:00Z")
+                        .param("to", "2026-07-22T19:40:00Z"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("'from' must not be after 'to'"));
+
+        verify(statsService, never()).timeseries(any(), any());
+    }
+
+    private static TimeSeriesResponse emptySeries() {
+        return new TimeSeriesResponse(
+                null, new TimeSeriesResponse.TimeRange(null, null), "1m", List.of());
     }
 }

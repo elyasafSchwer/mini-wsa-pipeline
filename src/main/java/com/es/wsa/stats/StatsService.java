@@ -17,4 +17,18 @@ public interface StatsService {
      * @return the aggregated summary
      */
     StatsSummaryResponse summarize(StatsQuery query);
+
+    /**
+     * Buckets event counts by a fixed time interval over the query's range, for charting.
+     *
+     * <p>The caller is expected to have validated that {@code query.from()} and
+     * {@code query.to()} are both present (they bound the histogram axis and the zero-fill
+     * extended bounds).
+     *
+     * @param query    the configuration/time-range filter; {@code from} and {@code to} must
+     *                 be set
+     * @param interval the bucket granularity
+     * @return contiguous per-interval counts (zero-count intervals included)
+     */
+    TimeSeriesResponse timeseries(StatsQuery query, TimeInterval interval);
 }

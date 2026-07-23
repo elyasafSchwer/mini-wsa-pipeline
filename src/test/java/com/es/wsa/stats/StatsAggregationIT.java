@@ -132,6 +132,28 @@ class StatsAggregationIT {
         assertThat(summary.avgThreatScore()).isEqualTo(0.0);
     }
 
+    @Test
+    void timeseriesBucketsByHourWithZeroFilledGaps() {
+        // a1/a2/a3 are on 2026-07-10 at 10:00, 11:00, 12:00. Ask for hourly buckets over
+        // 10:00-13:00 -> four 1h buckets: 10h=1, 11h=1, 12h=1, 13h=0 (zero-filled gap).
+        StatsQuery query = new StatsQuery(
+                CONFIG,
+                java.time.OffsetDateTime.parse("2026-07-10T10:00:00Z"),
+                java.time.OffsetDateTime.parse("2026-07-10T13:00:00Z"));
+
+        TimeSeriesResponse series = statsService.timeseries(query, TimeInterval.H1);
+
+        assertThat(series.configId()).isEqualTo(CONFIG);
+        assertThat(series.interval()).isEqualTo("1h");
+        // extended_bounds [10:00, 13:00] with min_doc_count=0 -> four contiguous buckets.
+        assertThat(series.buckets()).hasSize(4);
+        assertThat(series.buckets()).extracting(TimeSeriesResponse.Bucket::count)
+                .containsExactly(1L, 1L, 1L, 0L);
+        // Total across buckets equals the in-range event count.
+        long total = series.buckets().stream().mapToLong(TimeSeriesResponse.Bucket::count).sum();
+        assertThat(total).isEqualTo(3);
+    }
+
     // --- fixtures ----------------------------------------------------------------------
 
     private void indexFixtures() {

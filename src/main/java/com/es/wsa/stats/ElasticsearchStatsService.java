@@ -1,6 +1,8 @@
 package com.es.wsa.stats;
 
 import co.elastic.clients.elasticsearch._types.aggregations.Aggregation;
+import co.elastic.clients.elasticsearch._types.aggregations.DateHistogramBucket;
+import co.elastic.clients.elasticsearch._types.aggregations.FieldDateMath;
 import co.elastic.clients.elasticsearch._types.aggregations.StringTermsBucket;
 import co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
@@ -52,6 +54,8 @@ public class ElasticsearchStatsService implements StatsService {
     private static final String AGG_AVG_THREAT = "avg_threat";
     /** Name of the avg-threat-score sub-aggregation nested inside a terms bucket. */
     private static final String SUB_AVG_THREAT = "bucket_avg_threat";
+    /** Name of the date-histogram aggregation used by {@link #timeseries}. */
+    private static final String AGG_OVER_TIME = "over_time";
 
     private final ElasticsearchOperations operations;
 
@@ -89,6 +93,27 @@ public class ElasticsearchStatsService implements StatsService {
                 mapAttackers(aggs.get(AGG_TOP_ATTACKERS)),
                 mapPaths(aggs.get(AGG_TOP_PATHS)),
                 round(aggs.get(AGG_AVG_THREAT).avg().value()));
+    }
+
+    @Override
+    public TimeSeriesResponse timeseries(StatsQuery query, TimeInterval interval) {
+        NativeQuery nativeQuery = NativeQuery.builder()
+                .withQuery(buildFilter(query))
+                .withAggregation(AGG_OVER_TIME, dateHistogram(interval, query.from(), query.to()))
+                .withMaxResults(0)
+                .build();
+
+        SearchHits<SecurityEventDocument> hits =
+                operations.search(nativeQuery, SecurityEventDocument.class);
+
+        Map<String, co.elastic.clients.elasticsearch._types.aggregations.Aggregate> aggs =
+                toAggregateMap(hits.getAggregations());
+
+        return new TimeSeriesResponse(
+                query.configId(),
+                new TimeSeriesResponse.TimeRange(format(query.from()), format(query.to())),
+                interval.token(),
+                mapBuckets(aggs.get(AGG_OVER_TIME)));
     }
 
     // --- query construction -------------------------------------------------------------
@@ -163,6 +188,24 @@ public class ElasticsearchStatsService implements StatsService {
         return Aggregation.of(a -> a.avg(av -> av.field(field)));
     }
 
+    /**
+     * A {@code date_histogram} over {@code timestamp} with a fixed interval. Uses
+     * {@code min_doc_count = 0} and {@code extended_bounds(from, to)} so every interval in
+     * the requested range is returned — including empty ones — giving a chart a continuous,
+     * gap-free series. {@code from}/{@code to} are formatted with the same lenient
+     * {@code strict_date_optional_time} format used by the range filter.
+     */
+    private Aggregation dateHistogram(TimeInterval interval, OffsetDateTime from, OffsetDateTime to) {
+        FieldDateMath min = FieldDateMath.of(m -> m.expr(format(from)));
+        FieldDateMath max = FieldDateMath.of(m -> m.expr(format(to)));
+        return Aggregation.of(a -> a.dateHistogram(h -> h
+                .field("timestamp")
+                .fixedInterval(fi -> fi.time(interval.esInterval()))
+                .minDocCount(0)
+                .format("strict_date_optional_time")
+                .extendedBounds(eb -> eb.min(min).max(max))));
+    }
+
     // --- aggregation result mapping -----------------------------------------------------
 
     @SuppressWarnings("unchecked")
@@ -215,6 +258,15 @@ public class ElasticsearchStatsService implements StatsService {
         List<StatsSummaryResponse.PathStat> out = new ArrayList<>();
         for (StringTermsBucket bucket : agg.sterms().buckets().array()) {
             out.add(new StatsSummaryResponse.PathStat(bucket.key().stringValue(), bucket.docCount()));
+        }
+        return out;
+    }
+
+    private List<TimeSeriesResponse.Bucket> mapBuckets(
+            co.elastic.clients.elasticsearch._types.aggregations.Aggregate agg) {
+        List<TimeSeriesResponse.Bucket> out = new ArrayList<>();
+        for (DateHistogramBucket bucket : agg.dateHistogram().buckets().array()) {
+            out.add(new TimeSeriesResponse.Bucket(bucket.keyAsString(), bucket.docCount()));
         }
         return out;
     }

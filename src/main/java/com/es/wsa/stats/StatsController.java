@@ -64,6 +64,50 @@ public class StatsController {
         return response;
     }
 
+    /**
+     * Returns event counts bucketed by a fixed time interval, for a line chart.
+     *
+     * <p>Unlike {@code /summary}, {@code from} and {@code to} are <em>required</em>: they
+     * bound the histogram axis and the zero-fill extended bounds, and prevent an unbounded
+     * fine-grained histogram from producing a runaway number of buckets.
+     *
+     * @param configId optional configuration filter; omitted aggregates across all configs
+     * @param from     required inclusive lower bound (ISO-8601 offset datetime)
+     * @param to       required inclusive upper bound (ISO-8601 offset datetime)
+     * @param interval optional bucket size, one of {@code 1m|5m|1h}; defaults to {@code 1m}
+     * @return {@code 200} with the bucketed counts, or {@code 400} on any invalid parameter
+     */
+    @GetMapping("/timeseries")
+    public TimeSeriesResponse timeseries(
+            @RequestParam(required = false) Long configId,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to,
+            @RequestParam(required = false, defaultValue = "1m") String interval) {
+
+        OffsetDateTime fromTs = parse("from", from);
+        OffsetDateTime toTs = parse("to", to);
+
+        if (fromTs == null || toTs == null) {
+            throw new InvalidStatsQueryException("'from' and 'to' are required for timeseries");
+        }
+        if (fromTs.isAfter(toTs)) {
+            throw new InvalidStatsQueryException("'from' must not be after 'to'");
+        }
+
+        TimeInterval parsedInterval;
+        try {
+            parsedInterval = TimeInterval.fromToken(interval);
+        } catch (IllegalArgumentException ex) {
+            throw new InvalidStatsQueryException(ex.getMessage());
+        }
+
+        TimeSeriesResponse response =
+                statsService.timeseries(new StatsQuery(configId, fromTs, toTs), parsedInterval);
+        log.debug("stats/timeseries configId={} from={} to={} interval={} -> {} bucket(s)",
+                configId, from, to, interval, response.buckets().size());
+        return response;
+    }
+
     /** Parses an optional ISO-8601 offset datetime, mapping bad input to a 400. */
     private static OffsetDateTime parse(String param, String value) {
         if (value == null || value.isBlank()) {
