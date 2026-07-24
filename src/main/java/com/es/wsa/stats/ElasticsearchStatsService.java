@@ -75,6 +75,10 @@ public class ElasticsearchStatsService implements StatsService {
                 .withAggregation(AGG_TOP_ATTACKERS, termsWithAvgThreat("clientIp", TOP_N, null))
                 .withAggregation(AGG_TOP_PATHS, terms("path.keyword", TOP_N, UNKNOWN))
                 .withAggregation(AGG_AVG_THREAT, avg("threatScore"))
+                // Force an exact total: totalEvents is read from getTotalHits(), which
+                // Elasticsearch otherwise caps at 10,000 (relation "gte"), understating the
+                // count on large indices. The aggregation buckets are always exact regardless.
+                .withTrackTotalHits(true)
                 .withMaxResults(0)
                 .build();
 

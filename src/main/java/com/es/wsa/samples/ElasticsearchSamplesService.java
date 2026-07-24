@@ -46,6 +46,10 @@ public class ElasticsearchSamplesService implements SamplesService {
                 .withQuery(buildFilter(query))
                 .withSort(s -> s.field(f -> f.field("timestamp").order(SortOrder.Desc)))
                 .withPageable(new OffsetLimit(query.offset(), query.limit()))
+                // Force an exact total. Elasticsearch otherwise stops counting at 10,000 and
+                // returns a lower-bounded (relation "gte") value, which would make the
+                // reported total — and thus the client's page count — wrong on large indices.
+                .withTrackTotalHits(true)
                 .build();
 
         SearchHits<SecurityEventDocument> hits =
