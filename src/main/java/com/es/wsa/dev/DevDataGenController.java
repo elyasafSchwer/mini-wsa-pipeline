@@ -35,7 +35,7 @@ import java.util.List;
  * (de)serialization, validation, enrichment and storage end to end.
  */
 @RestController
-@RequestMapping("/v1/dev/datagen")
+@RequestMapping("/api/dev")
 @Profile("dev")
 public class DevDataGenController {
 
@@ -72,8 +72,8 @@ public class DevDataGenController {
      * @param waveRatio fraction of events belonging to attack waves in {@code [0, 1]}; optional
      * @return a summary of what was generated and the feed result
      */
-    @PostMapping("/run")
-    public DevDataGenResult run(
+    @PostMapping("/generate")
+    public DevDataGenResult generate(
             @RequestParam(required = false) Integer count,
             @RequestParam(required = false) Long seed,
             @RequestParam(required = false) Double waveRatio) {

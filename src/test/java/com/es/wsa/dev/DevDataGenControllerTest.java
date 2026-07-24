@@ -73,7 +73,7 @@ class DevDataGenControllerTest {
         @Test
         void runGeneratesAndFeeds() throws Exception {
             // count=120, batchSize default 50 -> 3 batches, 120 events accepted by the stub.
-            mockMvc.perform(post("/v1/dev/datagen/run").param("count", "120").param("seed", "1"))
+            mockMvc.perform(post("/api/dev/generate").param("count", "120").param("seed", "1"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.generated").value(120))
                     .andExpect(jsonPath("$.feed.totalEvents").value(120))
@@ -92,7 +92,7 @@ class DevDataGenControllerTest {
 
         @Test
         void routeIsAbsentWithoutDevProfile() throws Exception {
-            mockMvc.perform(post("/v1/dev/datagen/run"))
+            mockMvc.perform(post("/api/dev/generate"))
                     .andExpect(status().isNotFound());
         }
     }
