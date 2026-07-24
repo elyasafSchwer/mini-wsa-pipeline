@@ -1,26 +1,29 @@
 package com.es.wsa.config;
 
+import com.es.wsa.messaging.KeyedExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableAsync;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
-
-import java.util.concurrent.Executor;
-import java.util.concurrent.ThreadPoolExecutor;
 
 /**
- * Enables asynchronous event handling and provides the executor that backs the enrichment
- * consumer.
+ * Provides the executor that backs the enrichment consumer.
  *
- * <p>The consumer runs on a dedicated, bounded {@link ThreadPoolTaskExecutor} rather than
- * Spring's default {@code SimpleAsyncTaskExecutor} (which spawns an unbounded number of
- * threads). A bounded pool with an explicit queue and a {@link ThreadPoolExecutor.CallerRunsPolicy
- * caller-runs} rejection policy gives production-sensible back-pressure: if enrichment
- * falls behind, the publishing thread absorbs the work instead of the queue growing
- * without limit. This mirrors the bounded-consumer model a Kafka consumer group would
- * provide in the target architecture.
+ * <p>Enrichment runs on a {@link KeyedExecutor}: a fixed set of single-thread lanes keyed by
+ * {@code clientIp}. This gives <strong>per-IP ordering with cross-IP parallelism</strong> —
+ * all events from one IP are enriched serially in ingestion order (so the repeat-offender
+ * sliding-window count is observed deterministically), while different IPs process in
+ * parallel. It is the in-JVM analogue of "one consumer thread per Kafka partition", keyed on
+ * the same {@code SecurityEventMessage.partitionKey()} a Kafka producer would use.
+ *
+ * <p>Each lane is bounded with a caller-runs rejection policy, so a saturated lane applies
+ * back-pressure (the ingestion thread absorbs the work) instead of dropping events or growing
+ * memory without limit — the same production posture as a bounded Kafka consumer.
+ *
+ * <p>{@link EnableAsync @EnableAsync} remains enabled for any other {@code @Async} use; the
+ * enrichment path itself no longer relies on {@code @Async} method dispatch — it routes to a
+ * lane explicitly so it can pin work by key.
  */
 @Configuration
 @EnableAsync
@@ -28,25 +31,19 @@ public class AsyncConfig {
 
     private static final Logger log = LoggerFactory.getLogger(AsyncConfig.class);
 
-    /** Bean name referenced by {@code @Async} on the enrichment consumer. */
-    public static final String ENRICHMENT_EXECUTOR = "enrichmentTaskExecutor";
+    /** Number of enrichment lanes (parallelism ceiling; matches the prior pool's max size). */
+    private static final int ENRICHMENT_LANES = 8;
+    /** Bounded queue depth per lane before back-pressure (caller-runs) engages. */
+    private static final int LANE_QUEUE_CAPACITY = 500;
 
-    @Bean(name = ENRICHMENT_EXECUTOR)
-    public Executor enrichmentTaskExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(4);
-        executor.setMaxPoolSize(8);
-        executor.setQueueCapacity(500);
-        executor.setThreadNamePrefix("enrichment-");
-        // Back-pressure: when the pool and queue are saturated, run on the caller thread
-        // rather than dropping events or growing memory unbounded.
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
-        // Let in-flight enrichment finish on shutdown instead of being interrupted.
-        executor.setWaitForTasksToCompleteOnShutdown(true);
-        executor.setAwaitTerminationSeconds(30);
-        executor.initialize();
-        log.info("Initialised enrichment executor '{}' (core={}, max={}, queue={})",
-                ENRICHMENT_EXECUTOR, executor.getCorePoolSize(), executor.getMaxPoolSize(), 500);
+    /**
+     * The keyed executor backing enrichment. {@code destroyMethod = "shutdown"} lets
+     * in-flight enrichment finish on application shutdown.
+     */
+    @Bean(destroyMethod = "shutdown")
+    public KeyedExecutor enrichmentExecutor() {
+        KeyedExecutor executor = new KeyedExecutor(ENRICHMENT_LANES, LANE_QUEUE_CAPACITY, "enrichment-");
+        log.info("Enrichment executor ready ({} lanes, per-IP ordering)", executor.laneCount());
         return executor;
     }
 }

@@ -45,10 +45,12 @@ public class SamplesController {
      * Returns a page of enriched events matching the filters, newest first.
      *
      * @param configId optional configuration filter
+     * @param clientIp optional client-IP filter (exact address; also accepts CIDR)
      * @param from     optional inclusive lower bound (ISO-8601 offset datetime)
      * @param to       optional inclusive upper bound (ISO-8601 offset datetime)
      * @param category optional attack-category filter ({@code rule.category})
      * @param action   optional enforcement-action filter ({@code rule.action})
+     * @param repeatOffender optional repeat-offender flag filter ({@code true}/{@code false})
      * @param limit    page size, default {@value #DEFAULT_LIMIT}, clamped to [1, {@value #MAX_LIMIT}]
      * @param offset   records to skip, default 0, must be {@code >= 0}
      * @return {@code 200} with the page + total, or {@code 400} on invalid input
@@ -56,10 +58,12 @@ public class SamplesController {
     @GetMapping("/samples")
     public SampleResponse samples(
             @RequestParam(required = false) Long configId,
+            @RequestParam(required = false) String clientIp,
             @RequestParam(required = false) String from,
             @RequestParam(required = false) String to,
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String action,
+            @RequestParam(required = false) Boolean repeatOffender,
             @RequestParam(required = false, defaultValue = "20") int limit,
             @RequestParam(required = false, defaultValue = "0") int offset) {
 
@@ -79,14 +83,23 @@ public class SamplesController {
         int effectiveLimit = Math.min(limit, MAX_LIMIT);
 
         SampleQuery query = new SampleQuery(
-                configId, fromTs, toTs,
-                normalise(category), normalise(action),
+                configId, blankToNull(clientIp), fromTs, toTs,
+                normalise(category), normalise(action), repeatOffender,
                 effectiveLimit, offset);
 
         SampleResponse response = samplesService.findSamples(query);
-        log.debug("events/samples configId={} category={} action={} limit={} offset={} -> total={}, returned={}",
-                configId, category, action, effectiveLimit, offset, response.total(), response.items().size());
+        log.debug("events/samples configId={} clientIp={} category={} action={} repeatOffender={} limit={} offset={} -> total={}, returned={}",
+                configId, clientIp, category, action, repeatOffender, effectiveLimit, offset,
+                response.total(), response.items().size());
         return response;
+    }
+
+    /** Trims a value; blank/absent becomes {@code null} (no filter). Case is preserved. */
+    private static String blankToNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
     }
 
     /**

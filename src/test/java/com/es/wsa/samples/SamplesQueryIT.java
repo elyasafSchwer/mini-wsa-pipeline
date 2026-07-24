@@ -66,7 +66,7 @@ class SamplesQueryIT {
     void returnsMatchingEventsNewestFirstWithTotal() {
         // configId filter -> all 5 fixtures; sorted by timestamp desc.
         SampleResponse page = samplesService.findSamples(
-                new SampleQuery(CONFIG, null, null, null, null, 20, 0));
+                new SampleQuery(CONFIG, null, null, null, null, null, null, 20, 0));
 
         assertThat(page.total()).isEqualTo(5);
         assertThat(page.items()).hasSize(5);
@@ -81,7 +81,7 @@ class SamplesQueryIT {
     void filtersByCategoryAndAction() {
         // e1,e2,e3 are INJECTION; of those e1,e3 are DENY.
         SampleResponse page = samplesService.findSamples(
-                new SampleQuery(CONFIG, null, null, "INJECTION", "DENY", 20, 0));
+                new SampleQuery(CONFIG, null, null, null, "INJECTION", "DENY", null, 20, 0));
 
         assertThat(page.total()).isEqualTo(2);
         assertThat(page.items()).extracting(SampleResponse.Sample::ruleCategory)
@@ -91,10 +91,42 @@ class SamplesQueryIT {
     }
 
     @Test
+    void filtersByClientIp() {
+        // Only e4 was sent from 198.51.100.9; the rest from 203.0.113.7.
+        SampleResponse page = samplesService.findSamples(
+                new SampleQuery(CONFIG, "198.51.100.9", null, null, null, null, null, 20, 0));
+
+        assertThat(page.total()).isEqualTo(1);
+        assertThat(page.items()).singleElement()
+                .extracting(SampleResponse.Sample::eventId).isEqualTo(CONFIG + "-e4");
+        assertThat(page.items().get(0).clientIp()).isEqualTo("198.51.100.9");
+    }
+
+    @Test
+    void filtersByRepeatOffender() {
+        // Only e3 and e1 are flagged repeat offenders; newest-first -> e3 then e1.
+        SampleResponse page = samplesService.findSamples(
+                new SampleQuery(CONFIG, null, null, null, null, null, true, 20, 0));
+
+        assertThat(page.total()).isEqualTo(2);
+        assertThat(page.items()).extracting(SampleResponse.Sample::repeatOffender).containsOnly(true);
+        assertThat(page.items())
+                .extracting(SampleResponse.Sample::eventId)
+                .containsExactly(CONFIG + "-e3", CONFIG + "-e1");
+
+        // The complementary filter returns the other three.
+        SampleResponse notOffenders = samplesService.findSamples(
+                new SampleQuery(CONFIG, null, null, null, null, null, false, 20, 0));
+        assertThat(notOffenders.total()).isEqualTo(3);
+        assertThat(notOffenders.items()).extracting(SampleResponse.Sample::repeatOffender)
+                .containsOnly(false);
+    }
+
+    @Test
     void paginatesWithLimitAndOffset() {
         // total stays 5 regardless of paging; page 2 (offset 2, limit 2) returns e3,e2.
         SampleResponse page = samplesService.findSamples(
-                new SampleQuery(CONFIG, null, null, null, null, 2, 2));
+                new SampleQuery(CONFIG, null, null, null, null, null, null, 2, 2));
 
         assertThat(page.total()).isEqualTo(5);
         assertThat(page.limit()).isEqualTo(2);
@@ -107,21 +139,23 @@ class SamplesQueryIT {
     // --- fixtures ----------------------------------------------------------------------
 
     private void indexFixtures() {
-        save("e1", "INJECTION", Action.DENY, "2026-07-10T10:00:00Z");
-        save("e2", "INJECTION", Action.ALERT, "2026-07-10T10:01:00Z");
-        save("e3", "INJECTION", Action.DENY, "2026-07-10T10:02:00Z");
-        save("e4", "BOT", Action.MONITOR, "2026-07-10T10:03:00Z");
-        save("e5", "XSS", Action.DENY, "2026-07-10T10:04:00Z");
+        // e1 and e3 are flagged repeat offenders; the rest are not.
+        save("e1", "203.0.113.7", "INJECTION", Action.DENY, true, "2026-07-10T10:00:00Z");
+        save("e2", "203.0.113.7", "INJECTION", Action.ALERT, false, "2026-07-10T10:01:00Z");
+        save("e3", "203.0.113.7", "INJECTION", Action.DENY, true, "2026-07-10T10:02:00Z");
+        save("e4", "198.51.100.9", "BOT", Action.MONITOR, false, "2026-07-10T10:03:00Z");
+        save("e5", "203.0.113.7", "XSS", Action.DENY, false, "2026-07-10T10:04:00Z");
         operations.indexOps(SecurityEventDocument.class).refresh();
     }
 
-    private void save(String id, String category, Action action, String ts) {
+    private void save(String id, String ip, String category, Action action,
+                      boolean repeatOffender, String ts) {
         storageService.save(new SecurityEvent(
                 CONFIG + "-" + id,
                 OffsetDateTime.parse(ts),
                 CONFIG,
                 "policy-1",
-                "203.0.113.7",
+                ip,
                 "example.com",
                 "/login",
                 "POST",
@@ -134,7 +168,7 @@ class SamplesQueryIT {
                 new GeoLocation("US", "NYC"),
                 category,
                 80,
-                false));
+                repeatOffender));
     }
 
     private static boolean elasticsearchReachable() {

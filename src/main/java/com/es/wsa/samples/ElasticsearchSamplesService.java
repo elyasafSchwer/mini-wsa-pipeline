@@ -76,6 +76,12 @@ public class ElasticsearchSamplesService implements SamplesService {
             bool.filter(f -> f.term(t -> t.field("configId").value(query.configId())));
             any = true;
         }
+        if (query.clientIp() != null) {
+            // clientIp is an `ip`-typed field: a term filter matches an exact address, and
+            // also accepts CIDR notation (e.g. "203.0.113.0/24") for a subnet match.
+            bool.filter(f -> f.term(t -> t.field("clientIp").value(query.clientIp())));
+            any = true;
+        }
         if (query.from() != null || query.to() != null) {
             bool.filter(f -> f.range(r -> {
                 r.field("timestamp").format("strict_date_optional_time");
@@ -95,6 +101,10 @@ public class ElasticsearchSamplesService implements SamplesService {
         }
         if (query.action() != null) {
             bool.filter(f -> f.term(t -> t.field("ruleAction").value(query.action())));
+            any = true;
+        }
+        if (query.repeatOffender() != null) {
+            bool.filter(f -> f.term(t -> t.field("repeatOffender").value(query.repeatOffender())));
             any = true;
         }
 

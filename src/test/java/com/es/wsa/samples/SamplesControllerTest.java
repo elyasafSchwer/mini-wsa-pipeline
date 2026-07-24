@@ -95,6 +95,43 @@ class SamplesControllerTest {
     }
 
     @Test
+    void passesClientIpFilterThroughUnchanged() throws Exception {
+        when(samplesService.findSamples(any())).thenReturn(oneItem());
+
+        mockMvc.perform(get("/v1/events/samples").param("clientIp", "203.0.113.42"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<SampleQuery> captor = ArgumentCaptor.forClass(SampleQuery.class);
+        verify(samplesService).findSamples(captor.capture());
+        // IPs are case-sensitive/exact — passed through verbatim (not upper-cased).
+        assertThat(captor.getValue().clientIp()).isEqualTo("203.0.113.42");
+    }
+
+    @Test
+    void bindsRepeatOffenderFilter() throws Exception {
+        when(samplesService.findSamples(any())).thenReturn(oneItem());
+
+        mockMvc.perform(get("/v1/events/samples").param("repeatOffender", "true"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<SampleQuery> captor = ArgumentCaptor.forClass(SampleQuery.class);
+        verify(samplesService).findSamples(captor.capture());
+        assertThat(captor.getValue().repeatOffender()).isTrue();
+    }
+
+    @Test
+    void repeatOffenderIsNullWhenOmitted() throws Exception {
+        when(samplesService.findSamples(any())).thenReturn(oneItem());
+
+        mockMvc.perform(get("/v1/events/samples")).andExpect(status().isOk());
+
+        ArgumentCaptor<SampleQuery> captor = ArgumentCaptor.forClass(SampleQuery.class);
+        verify(samplesService).findSamples(captor.capture());
+        // Absent -> null means "no filter", distinct from an explicit false.
+        assertThat(captor.getValue().repeatOffender()).isNull();
+    }
+
+    @Test
     void rejectsNegativeOffset() throws Exception {
         mockMvc.perform(get("/v1/events/samples").param("offset", "-1"))
                 .andExpect(status().isBadRequest())

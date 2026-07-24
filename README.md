@@ -239,10 +239,12 @@ can compute the number of pages.
 | Param | Type | Default | Description |
 |---|---|---|---|
 | `configId` | long | — | restrict to one configuration |
+| `clientIp` | string | — | restrict to one client IP (exact address; also accepts CIDR, e.g. `203.0.113.0/24`) |
 | `from` | ISO-8601 | — | inclusive lower bound on event `timestamp` |
 | `to` | ISO-8601 | — | inclusive upper bound on event `timestamp` |
 | `category` | string | — | attack category, e.g. `INJECTION`, `XSS`, `BOT` (case-insensitive) |
 | `action` | string | — | enforcement action: `DENY`, `ALERT`, `MONITOR` (case-insensitive) |
+| `repeatOffender` | boolean | — | `true`/`false` — restrict to events (not) flagged as repeat offenders |
 | `limit` | int | `20` | page size, **max 100** (values above 100 are clamped) |
 | `offset` | int | `0` | number of records to skip (pagination) |
 
@@ -257,6 +259,12 @@ curl -s "http://localhost:8080/v1/events/samples" | jq
 
 # Filter: blocked SQL-injection events for one config, second page of 50
 curl -s "http://localhost:8080/v1/events/samples?configId=14227&category=INJECTION&action=DENY&limit=50&offset=50" | jq
+
+# Filter: all events from a single attacker IP
+curl -s "http://localhost:8080/v1/events/samples?clientIp=203.0.113.42" | jq
+
+# Filter: only repeat-offender events (tripped the rate-limit / +15 bonus)
+curl -s "http://localhost:8080/v1/events/samples?repeatOffender=true" | jq
 ```
 
 **Sample response:**

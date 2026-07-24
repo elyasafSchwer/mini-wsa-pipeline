@@ -10,15 +10,20 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for {@link SecurityEventConsumer}. Runs the listener method directly
- * (synchronously) with a mocked {@link EventProcessor} and {@link EventStorageService} —
- * the {@code @Async} dispatch is Spring's concern, not this unit's.
+ * Unit tests for {@link SecurityEventConsumer}.
+ *
+ * <p>The enrich→store body is exercised via the synchronous {@link SecurityEventConsumer#process}
+ * method (lane dispatch is {@link KeyedExecutor}'s concern, covered separately). A dedicated
+ * test verifies {@code onSecurityEvent} routes to the keyed executor by the message's
+ * partition key.
  */
 @ExtendWith(MockitoExtension.class)
 class SecurityEventConsumerTest {
@@ -29,14 +34,20 @@ class SecurityEventConsumerTest {
     @Mock
     private EventStorageService storageService;
 
+    @Mock
+    private KeyedExecutor enrichmentExecutor;
+
+    private SecurityEventConsumer consumer() {
+        return new SecurityEventConsumer(eventProcessor, storageService, enrichmentExecutor);
+    }
+
     @Test
     void enrichesThenStoresEvent() {
-        SecurityEventConsumer consumer = new SecurityEventConsumer(eventProcessor, storageService);
         SecurityEvent event = sampleEvent("evt-1");
         SecurityEvent enriched = event.withAttackType("SQLi").withThreatScore(80);
         when(eventProcessor.process(any())).thenReturn(enriched);
 
-        consumer.onSecurityEvent(new SecurityEventMessage(event));
+        consumer().process(new SecurityEventMessage(event));
 
         verify(eventProcessor, times(1)).process(event);
         // The enriched event (not the raw one) is what gets persisted.
@@ -45,31 +56,47 @@ class SecurityEventConsumerTest {
 
     @Test
     void swallowsEnrichmentFailuresGracefully() {
-        SecurityEventConsumer consumer = new SecurityEventConsumer(eventProcessor, storageService);
         SecurityEvent event = sampleEvent("evt-boom");
         when(eventProcessor.process(any())).thenThrow(new RuntimeException("enrichment blew up"));
 
-        // The consumer must not propagate the failure — a poison event cannot crash the
-        // consumer thread or block subsequent events.
-        assertThatCode(() -> consumer.onSecurityEvent(new SecurityEventMessage(event)))
+        // A poison event cannot crash the lane or block subsequent events.
+        assertThatCode(() -> consumer().process(new SecurityEventMessage(event)))
                 .doesNotThrowAnyException();
 
         verify(eventProcessor).process(event);
-        // Enrichment failed, so nothing should have been persisted.
         verify(storageService, never()).save(any());
     }
 
     @Test
     void swallowsStorageFailuresGracefully() {
-        SecurityEventConsumer consumer = new SecurityEventConsumer(eventProcessor, storageService);
         SecurityEvent event = sampleEvent("evt-es-down");
         when(eventProcessor.process(any())).thenReturn(event);
         when(storageService.save(any())).thenThrow(new RuntimeException("elasticsearch down"));
 
-        // A storage outage must be swallowed just like an enrichment failure.
-        assertThatCode(() -> consumer.onSecurityEvent(new SecurityEventMessage(event)))
+        assertThatCode(() -> consumer().process(new SecurityEventMessage(event)))
                 .doesNotThrowAnyException();
 
+        verify(storageService).save(event);
+    }
+
+    @Test
+    void routesByPartitionKeyThenRunsProcessing() {
+        SecurityEvent event = sampleEvent("evt-route");   // clientIp 203.0.113.7
+        SecurityEventMessage message = new SecurityEventMessage(event);
+        when(eventProcessor.process(any())).thenReturn(event);
+
+        // Make the mock executor run the submitted task inline so we can assert its effect.
+        doAnswer(inv -> {
+            Runnable task = inv.getArgument(1);
+            task.run();
+            return null;
+        }).when(enrichmentExecutor).execute(eq("203.0.113.7"), any());
+
+        consumer().onSecurityEvent(message);
+
+        // Routed with the client IP as the key, and processing ran (enrich + store).
+        verify(enrichmentExecutor).execute(eq("203.0.113.7"), any());
+        verify(eventProcessor).process(event);
         verify(storageService).save(event);
     }
 
