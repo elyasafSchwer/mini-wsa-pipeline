@@ -1,0 +1,18 @@
+# Keep the Docker build context small: the image builds the jar itself, so host
+# build output, generated data, and IDE/VCS metadata should never be sent to the daemon.
+target/
+data/
+*.log
+
+.git/
+.gitignore
+.idea/
+*.iml
+
+.DS_Store
+
+# The image runs the built jar, not these tooling files.
+scripts/
+Dockerfile
+docker-compose.yml
+.dockerignore

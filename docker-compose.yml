@@ -1,13 +1,10 @@
-version: '3.8'
-
+# A single compose file for two workflows:
+#   A) Full stack (review / prod-like):  docker compose up -d
+#      -> brings up elasticsearch, redis, AND the app.
+#   B) Local dev (run app from IntelliJ): docker compose up -d redis elasticsearch
+#      -> brings up only the databases; you run Spring Boot on the host, which reaches
+#         them via the published ports localhost:6379 / localhost:9200.
 services:
-  redis:
-    image: redis:7-alpine
-    container_name: wsa-redis
-    ports:
-      - "6379:6379"
-    restart: unless-stopped
-
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
     container_name: wsa-elasticsearch
@@ -17,4 +14,45 @@ services:
       - ES_JAVA_OPTS=-Xms512m -Xmx512m
     ports:
       - "9200:9200"
+    # Lets wsa-app wait for ES to be actually ready (not just started) before booting.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: wsa-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  wsa-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mini-wsa:latest
+    container_name: wsa-app
+    ports:
+      - "8080:8080"
+    environment:
+      # These override the ${...} placeholders in application.yml. Inside the compose
+      # network, services reach each other by service name, so the app connects to the
+      # DB containers via their hostnames "elasticsearch" and "redis" (NOT localhost).
+      - ELASTICSEARCH_URIS=http://elasticsearch:9200
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
