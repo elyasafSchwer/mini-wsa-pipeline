@@ -35,6 +35,8 @@ POST /v1/events →│  Ingestion   │ ─────────────�
 | `GET /v1/stats/summary` | Aggregated stats (counts by category/action, top attackers/paths, avg threat score). |
 | `GET /v1/stats/timeseries` | Event counts bucketed by `1m` / `5m` / `1h` for charting. |
 | `POST /api/dev/generate` | **`dev` profile only** — generate + ingest simulated attack data. |
+| `POST /api/dev/clear` | **`dev` profile only** — delete all events from the index. |
+| `POST /api/dev/upload` | **`dev` profile only** — upload a JSON or CSV file and ingest its events. |
 
 ---
 
@@ -203,6 +205,50 @@ curl -X POST "http://localhost:8080/api/dev/generate?count=2000&seed=42&waveRati
 ```
 
 `batchesSent` reflects the batches-of-50 delivery (2000 ÷ 50 = 40).
+
+### Clearing the index
+
+Delete every document from the `security-events` index in one call:
+
+```bash
+curl -X POST "http://localhost:8080/api/dev/clear"
+```
+
+**Sample response:**
+
+```json
+{ "deleted": 2000 }
+```
+
+### Uploading an event file
+
+Feed a locally-produced JSON or CSV file straight into the ingestion pipeline. The format
+is auto-detected from the filename extension (`.json` or `.csv`). The same
+`events.json` / `events.csv` files in the `data/` directory work directly.
+
+```bash
+# JSON
+curl -X POST "http://localhost:8080/api/dev/upload" \
+     -F "file=@data/events.json"
+
+# CSV
+curl -X POST "http://localhost:8080/api/dev/upload" \
+     -F "file=@data/events.csv"
+```
+
+**Sample response** (same shape as `/generate`):
+
+```json
+{
+  "generated": 500,
+  "feed": {
+    "totalEvents": 500,
+    "batchesSent": 10,
+    "batchesFailed": 0,
+    "accepted": 500
+  }
+}
+```
 
 ### Verify the ingested data
 

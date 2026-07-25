@@ -1,4 +1,4 @@
-package com.es.wsa.api;
+package com.es.wsa.ingest;
 
 /**
  * Success body returned from {@code POST /v1/events/ingest}.

@@ -2,19 +2,29 @@ package com.es.wsa.dev;
 
 import com.es.wsa.config.WsaPolicyProperties;
 import com.es.wsa.datagen.AttackProfile;
+import com.es.wsa.datagen.EventFileReader;
 import com.es.wsa.datagen.IngestionFeeder;
 import com.es.wsa.datagen.SecurityEventGenerator;
 import com.es.wsa.domain.SecurityEvent;
+import com.es.wsa.ratelimit.IpRateTrackerService;
+import com.es.wsa.storage.SecurityEventRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Secret, developer-only trigger that runs the whole data-generation flow internally:
@@ -42,11 +52,15 @@ public class DevDataGenController {
     private static final Logger log = LoggerFactory.getLogger(DevDataGenController.class);
 
     private final WsaPolicyProperties policies;
+    private final SecurityEventRepository repository;
+    private final StringRedisTemplate redis;
     private final int batchSize;
     private final String baseUrl;
 
     /**
      * @param policies   supplies the attack-category vocabulary the generator draws from
+     * @param repository used by {@code /clear} to delete all indexed events
+     * @param redis      used by {@code /clear} to delete all per-IP rate-tracker keys
      * @param serverPort the running server's port, so the loopback base URL targets itself
      * @param baseUrl    optional explicit base-URL override ({@code wsa.datagen.ingest-base-url});
      *                   when unset, {@code http://localhost:<serverPort>} is used
@@ -54,10 +68,14 @@ public class DevDataGenController {
      */
     public DevDataGenController(
             WsaPolicyProperties policies,
+            SecurityEventRepository repository,
+            StringRedisTemplate redis,
             @Value("${local.server.port:8080}") int serverPort,
             @Value("${wsa.datagen.ingest-base-url:}") String baseUrl,
             @Value("${wsa.datagen.batch-size:50}") int batchSize) {
         this.policies = policies;
+        this.repository = repository;
+        this.redis = redis;
         this.batchSize = batchSize;
         this.baseUrl = (baseUrl == null || baseUrl.isBlank())
                 ? "http://localhost:" + serverPort
@@ -90,6 +108,65 @@ public class DevDataGenController {
         return new DevDataGenResult(events.size(), feedResult);
     }
 
+    /**
+     * Deletes every document from the {@code security-events} index and every per-IP
+     * rate-tracker key from Redis (keys matching {@code ip_events:*}).
+     *
+     * @return the number of Elasticsearch documents and Redis keys that were deleted
+     */
+    @PostMapping("/clear")
+    public ClearResult clear() {
+        long deletedEvents = repository.count();
+        repository.deleteAll();
+
+        Set<String> rateKeys = redis.keys(IpRateTrackerService.KEY_PREFIX + "*");
+        long deletedRateKeys = 0;
+        if (rateKeys != null && !rateKeys.isEmpty()) {
+            deletedRateKeys = redis.delete(rateKeys);
+        }
+
+        log.info("[dev] cleared {} event(s) from ES and {} rate-tracker key(s) from Redis",
+                deletedEvents, deletedRateKeys);
+        return new ClearResult(deletedEvents, deletedRateKeys);
+    }
+
+    /**
+     * Accepts a JSON or CSV file upload and feeds its events through the ingestion API
+     * (server-to-server over the loopback HTTP client), exactly like {@link #generate}.
+     * The format is auto-detected from the original filename extension ({@code .json} or
+     * {@code .csv}).
+     *
+     * @param file the uploaded event file
+     * @return a summary of events read and the feed result
+     */
+    @PostMapping(value = "/upload", consumes = "multipart/form-data")
+    public DevDataGenResult upload(@RequestParam("file") MultipartFile file) {
+        String originalName = file.getOriginalFilename() == null ? "upload" : file.getOriginalFilename();
+        Path tmp;
+        try {
+            String suffix = originalName.contains(".")
+                    ? originalName.substring(originalName.lastIndexOf('.'))
+                    : "";
+            tmp = Files.createTempFile("wsa-upload-", suffix);
+            file.transferTo(tmp);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to store uploaded file", e);
+        }
+
+        try {
+            List<SecurityEvent> events = new EventFileReader().read(tmp);
+            IngestionFeeder feeder = new IngestionFeeder(baseUrl, batchSize);
+            IngestionFeeder.FeedResult feedResult = feeder.feed(events);
+            log.info("[dev] upload '{}' against {}: read {}, {}", originalName, baseUrl, events.size(), feedResult);
+            return new DevDataGenResult(events.size(), feedResult);
+        } finally {
+            try {
+                Files.deleteIfExists(tmp);
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
     /** Overlays the supplied parameters onto {@link AttackProfile#withDefaults()}. */
     private AttackProfile buildProfile(Integer count, Long seed, Double waveRatio) {
         AttackProfile defaults = AttackProfile.withDefaults();
@@ -104,11 +181,20 @@ public class DevDataGenController {
     }
 
     /**
-     * Summary returned by the dev trigger.
+     * Summary returned by the dev generate/upload triggers.
      *
-     * @param generated number of events generated
+     * @param generated number of events read/generated
      * @param feed      the ingestion feed result
      */
     public record DevDataGenResult(int generated, IngestionFeeder.FeedResult feed) {
+    }
+
+    /**
+     * Summary returned by the dev clear trigger.
+     *
+     * @param deletedEvents    number of Elasticsearch documents deleted
+     * @param deletedRateKeys  number of Redis rate-tracker keys deleted
+     */
+    public record ClearResult(long deletedEvents, long deletedRateKeys) {
     }
 }

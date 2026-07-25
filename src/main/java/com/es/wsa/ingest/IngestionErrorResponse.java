@@ -1,4 +1,4 @@
-package com.es.wsa.api;
+package com.es.wsa.ingest;
 
 import java.util.List;
 

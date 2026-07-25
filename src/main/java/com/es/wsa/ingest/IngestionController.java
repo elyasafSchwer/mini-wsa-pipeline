@@ -1,4 +1,4 @@
-package com.es.wsa.api;
+package com.es.wsa.ingest;
 
 import com.es.wsa.domain.SecurityEvent;
 import com.es.wsa.publisher.EventPublisher;

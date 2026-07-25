@@ -1,6 +1,10 @@
 spring:
   application:
     name: MiniWSA
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
   # Business rules (attack categories, scoring) live in a dedicated policy file so this
   # file stays limited to server/spring/infrastructure concerns.
   config:

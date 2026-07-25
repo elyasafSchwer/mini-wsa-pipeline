@@ -52,7 +52,7 @@ public class IpRateTrackerService {
     private static final Logger log = LoggerFactory.getLogger(IpRateTrackerService.class);
 
     /** Prefix for per-IP ZSET keys. */
-    static final String KEY_PREFIX = "ip_events:";
+    public static final String KEY_PREFIX = "ip_events:";
 
     /**
      * Fixed TTL (2 hours) refreshed on every observation so idle IP keys expire safely.
