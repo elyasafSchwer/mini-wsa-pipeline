@@ -1,0 +1,22 @@
+# Standalone profile: run the whole app fully in-memory — no Elasticsearch, no Redis, no
+# Docker, no embedded server binaries. Activated with `--spring.profiles.active=standalone`
+# (which also pulls in `dev` via the profile group declared in application.yml).
+#
+# The two data starters' auto-configuration is excluded so Spring Boot never tries to open a
+# connection to Elasticsearch or Redis at startup. The bean *types* those (unmodified)
+# components still require to construct — ElasticsearchOperations, SecurityEventRepository,
+# StringRedisTemplate — are supplied as in-memory stand-ins by StandaloneConfig, and the
+# in-memory service implementations (marked @Primary) win every injection.
+spring:
+  main:
+    # Belt-and-suspenders: lets the @Primary in-memory beans coexist with the unprofiled
+    # Elasticsearch @Service beans without a definition-clash on startup.
+    allow-bean-definition-overriding: true
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.elasticsearch.ElasticsearchClientAutoConfiguration
+      - org.springframework.boot.autoconfigure.elasticsearch.ElasticsearchRestClientAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.elasticsearch.ElasticsearchDataAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.elasticsearch.ElasticsearchRepositoriesAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration

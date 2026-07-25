@@ -1,6 +1,12 @@
 spring:
   application:
     name: MiniWSA
+  # Profile groups. Activating `standalone` (fully in-memory: no Elasticsearch, no Redis,
+  # no Docker) automatically activates `dev` as well, so the dev-only tooling (e.g. the
+  # /api/dev data-generation endpoints) is available in a self-contained run.
+  profiles:
+    group:
+      standalone: [dev]
   servlet:
     multipart:
       max-file-size: 50MB
