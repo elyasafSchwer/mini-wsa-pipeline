@@ -20,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -78,6 +79,9 @@ class DevDataGenControllerTest {
         @MockBean
         private org.springframework.data.redis.core.StringRedisTemplate redis;
 
+        @MockBean
+        private com.es.wsa.messaging.KeyedExecutor enrichmentExecutor;
+
         @Autowired
         private MockMvc mockMvc;
 
@@ -107,6 +111,29 @@ class DevDataGenControllerTest {
                     .andExpect(jsonPath("$.deletedRateKeys").value(2));
 
             verify(repository).deleteAll();
+        }
+
+        @Test
+        void processingStatusReportsBusyThenIdle() throws Exception {
+            // Busy: 2 active + 3 queued -> idle=false.
+            org.mockito.Mockito.when(enrichmentExecutor.activeTaskCount()).thenReturn(2);
+            org.mockito.Mockito.when(enrichmentExecutor.queuedTaskCount()).thenReturn(3);
+
+            mockMvc.perform(get("/api/dev/processing-status"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.idle").value(false))
+                    .andExpect(jsonPath("$.activeTasks").value(2))
+                    .andExpect(jsonPath("$.queuedTasks").value(3));
+
+            // Drained: 0 active + 0 queued -> idle=true.
+            org.mockito.Mockito.when(enrichmentExecutor.activeTaskCount()).thenReturn(0);
+            org.mockito.Mockito.when(enrichmentExecutor.queuedTaskCount()).thenReturn(0);
+
+            mockMvc.perform(get("/api/dev/processing-status"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.idle").value(true))
+                    .andExpect(jsonPath("$.activeTasks").value(0))
+                    .andExpect(jsonPath("$.queuedTasks").value(0));
         }
 
         @Test

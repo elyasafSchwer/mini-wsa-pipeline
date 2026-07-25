@@ -21,7 +21,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * Slice tests for {@link SamplesController}: parameter parsing/validation, paging defaults
  * and clamping, and response shape, with a mocked {@link SamplesService}. The query logic
- * itself is covered by {@link SamplesQueryIT}.
+ * itself is covered by {@link SamplesQueryTests}.
  */
 @WebMvcTest(SamplesController.class)
 class SamplesControllerTest {

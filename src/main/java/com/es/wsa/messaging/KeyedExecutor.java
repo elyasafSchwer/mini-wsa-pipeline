@@ -125,6 +125,40 @@ public class KeyedExecutor {
         return lanes.size();
     }
 
+    /**
+     * @return the number of tasks currently executing across all lanes (a lane runs at most
+     * one task at a time, so this is the count of busy lanes)
+     */
+    public int activeTaskCount() {
+        int active = 0;
+        for (ThreadPoolExecutor lane : lanes) {
+            active += lane.getActiveCount();
+        }
+        return active;
+    }
+
+    /** @return the number of tasks waiting in lane queues across all lanes (not yet started). */
+    public int queuedTaskCount() {
+        int queued = 0;
+        for (ThreadPoolExecutor lane : lanes) {
+            queued += lane.getQueue().size();
+        }
+        return queued;
+    }
+
+    /**
+     * @return {@code true} when no task is executing and no task is queued on any lane — i.e.
+     * all submitted enrichment work has drained. Intended for tests/tooling that must know
+     * when it is safe to assert on the fully-processed state without polling arbitrary sleeps.
+     *
+     * <p>Note this is an instantaneous snapshot: a caller that is still submitting work may
+     * observe {@code true} between submissions. Callers should stop submitting first, then
+     * observe idle (ideally stable across two reads to close the dequeue/active-count gap).
+     */
+    public boolean isIdle() {
+        return activeTaskCount() == 0 && queuedTaskCount() == 0;
+    }
+
     /** Gracefully shuts every lane down, letting in-flight/queued tasks finish. */
     public void shutdown() {
         lanes.forEach(lane -> {

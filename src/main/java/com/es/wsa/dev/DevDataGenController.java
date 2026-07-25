@@ -6,6 +6,7 @@ import com.es.wsa.datagen.EventFileReader;
 import com.es.wsa.datagen.IngestionFeeder;
 import com.es.wsa.datagen.SecurityEventGenerator;
 import com.es.wsa.domain.SecurityEvent;
+import com.es.wsa.messaging.KeyedExecutor;
 import com.es.wsa.ratelimit.IpRateTrackerService;
 import com.es.wsa.storage.SecurityEventRepository;
 import org.slf4j.Logger;
@@ -13,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -54,6 +56,7 @@ public class DevDataGenController {
     private final WsaPolicyProperties policies;
     private final SecurityEventRepository repository;
     private final StringRedisTemplate redis;
+    private final KeyedExecutor enrichmentExecutor;
     private final int batchSize;
     private final String baseUrl;
 
@@ -61,6 +64,7 @@ public class DevDataGenController {
      * @param policies   supplies the attack-category vocabulary the generator draws from
      * @param repository used by {@code /clear} to delete all indexed events
      * @param redis      used by {@code /clear} to delete all per-IP rate-tracker keys
+     * @param enrichmentExecutor the enrichment lanes, interrogated by {@code /processing-status}
      * @param serverPort the running server's port, so the loopback base URL targets itself
      * @param baseUrl    optional explicit base-URL override ({@code wsa.datagen.ingest-base-url});
      *                   when unset, {@code http://localhost:<serverPort>} is used
@@ -70,12 +74,14 @@ public class DevDataGenController {
             WsaPolicyProperties policies,
             SecurityEventRepository repository,
             StringRedisTemplate redis,
+            KeyedExecutor enrichmentExecutor,
             @Value("${local.server.port:8080}") int serverPort,
             @Value("${wsa.datagen.ingest-base-url:}") String baseUrl,
             @Value("${wsa.datagen.batch-size:50}") int batchSize) {
         this.policies = policies;
         this.repository = repository;
         this.redis = redis;
+        this.enrichmentExecutor = enrichmentExecutor;
         this.batchSize = batchSize;
         this.baseUrl = (baseUrl == null || baseUrl.isBlank())
                 ? "http://localhost:" + serverPort
@@ -128,6 +134,25 @@ public class DevDataGenController {
         log.info("[dev] cleared {} event(s) from ES and {} rate-tracker key(s) from Redis",
                 deletedEvents, deletedRateKeys);
         return new ClearResult(deletedEvents, deletedRateKeys);
+    }
+
+    /**
+     * Reports whether the asynchronous enrichment pipeline has fully drained: no task is
+     * executing and none is queued on any {@link KeyedExecutor} lane.
+     *
+     * <p>Exists so tests and tooling can deterministically wait for all ingested events to
+     * finish enrichment before asserting on the final state — polling this instead of
+     * sleeping an arbitrary duration. Because ingestion publishes onto the lanes synchronously,
+     * a caller that has finished submitting and then observes {@code idle == true} (ideally
+     * stable across two consecutive reads) knows every event has been processed and stored.
+     *
+     * @return the current active/queued task counts and the derived idle flag
+     */
+    @GetMapping("/processing-status")
+    public ProcessingStatus processingStatus() {
+        int active = enrichmentExecutor.activeTaskCount();
+        int queued = enrichmentExecutor.queuedTaskCount();
+        return new ProcessingStatus(active == 0 && queued == 0, active, queued);
     }
 
     /**
@@ -196,5 +221,16 @@ public class DevDataGenController {
      * @param deletedRateKeys  number of Redis rate-tracker keys deleted
      */
     public record ClearResult(long deletedEvents, long deletedRateKeys) {
+    }
+
+    /**
+     * Snapshot of the enrichment pipeline's drain state, returned by
+     * {@code GET /api/dev/processing-status}.
+     *
+     * @param idle        {@code true} when no enrichment task is executing or queued
+     * @param activeTasks number of enrichment tasks currently running across all lanes
+     * @param queuedTasks number of enrichment tasks waiting in lane queues
+     */
+    public record ProcessingStatus(boolean idle, int activeTasks, int queuedTasks) {
     }
 }

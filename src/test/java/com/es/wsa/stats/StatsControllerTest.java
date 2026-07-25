@@ -21,7 +21,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * Slice tests for {@link StatsController}: parameter parsing/validation and response shape,
  * with a mocked {@link StatsService} (the aggregation logic itself is covered by
- * {@link StatsAggregationIT}).
+ * {@link StatsAggregationTests}).
  */
 @WebMvcTest(StatsController.class)
 class StatsControllerTest {
