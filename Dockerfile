@@ -30,4 +30,4 @@ COPY --from=build /build/target/mini-wsa-*.jar app.jar
 
 EXPOSE 8080
 
-ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+ENTRYPOINT ["java", "-Xmx256m", "-Xms256m", "-jar", "app.jar"]
