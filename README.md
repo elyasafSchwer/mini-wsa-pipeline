@@ -12,19 +12,28 @@ sliding-window rate tracker.
 ## Architecture at a glance
 
 ```
-                 ┌──────────────┐   Spring event bus (async)   ┌─────────────┐
-POST /v1/events →│  Ingestion   │ ───────────────────────────→ │ Enrichment  │
-  /ingest        │  (validate)  │                              │ + scoring   │
-                 └──────────────┘                              └──────┬──────┘
-                                                                      │
-                          ┌────────────┐  repeat-offender    ┌────────▼──────┐
-                          │   Redis    │◄───window counts────│  Elasticsearch │
-                          │ rate track │                     │  (storage)     │
-                          └────────────┘                     └────────┬───────┘
-                                                                      │
-                                              GET /v1/stats/summary ──┤
-                                              GET /v1/stats/timeseries┘
+                 ┌──────────────┐   Spring event bus (async)   ┌──────────────┐
+POST /v1/events →│  Ingestion   │ ───────────────────────────→ │  Enrichment  │
+  /ingest        │  (validate)  │                              │  + scoring   │
+                 └──────────────┘                              └─┬─────────┬──┘
+                                                                 │    ▲    │
+                              repeat-offender window counts      │    │    │  write enriched
+                          ┌──────────────┐◄───────────────────── ┘    │    │  document
+                          │    Redis     │────────────────────────────     ▼
+                          │  rate track  │                        ┌──────────────┐
+                          └──────────────┘                        │ Elasticsearch│
+                                                                  │  (storage)   │
+                                                                  └──────┬───────┘
+                                                                         │
+                                             GET /v1/stats/summary ──────┤
+                                             GET /v1/stats/timeseries ───┘
 ```
+
+The **Enrichment Service** is the only component that talks to Redis: it reads and updates
+the per-IP sliding-window counts there (state/counting for repeat-offender detection), then
+writes the **final enriched document** — attack type, threat score, and the resolved
+`repeatOffender` flag — to **Elasticsearch**. Elasticsearch and Redis never communicate with
+each other; the read APIs (`/v1/stats/*`, `/v1/events/samples`) query Elasticsearch only.
 
 ### Key endpoints
 
@@ -112,6 +121,22 @@ Unit and web-slice tests run with no external dependencies. The Elasticsearch
 integration test (`StatsAggregationIT`) is **self-skipping**: it runs only when ES is
 reachable on `localhost:9200`, otherwise it is skipped (never failed). To run it, start
 Elasticsearch first (`docker compose up -d elasticsearch`).
+
+### Running the UI
+
+A companion single-page UI visualizes the analytics APIs (summary charts, time series, and
+the repeat-offender drill-down). It is a separate repository. **Run it in the background**
+(in its own terminal) alongside the backend:
+
+```bash
+git clone https://github.com/elyasafSchwer/mini-wsa-ui.git
+cd mini-wsa-ui
+npm install
+npm run dev
+```
+
+The UI will be available at **http://localhost:5173/**. It talks to the backend on
+`http://localhost:8080`, so make sure the app (and its databases) are running first.
 
 ---
 
@@ -344,6 +369,69 @@ curl -s "http://localhost:8080/v1/events/samples?repeatOffender=true" | jq
 
 ---
 
+## 6. Data Integrity & Verification
+
+The enrichment output (threat score + repeat-offender flag) is deterministic, so it can be
+independently verified — both interactively through the UI and directly against Elasticsearch.
+
+### Manual verification via the UI
+
+The sliding-window rule is: an IP becomes a **repeat offender once its event count within a
+10-minute window exceeds the threshold of 5** — i.e. the **6th** event from the same IP
+inside that window is the first to be flagged. To confirm it visually:
+
+1. Ingest a dataset (e.g. `POST /api/dev/generate`, or upload `data/events.csv`).
+2. In the UI, filter the events for a single busy client IP.
+3. Walk its events in chronological order and verify that **the 6th event from that IP
+   within a 10-minute window is correctly flagged as a `repeatOffender`** (and that events
+   1–5 are not), and that the `+15` repeat-offender bonus is reflected in the threat score.
+
+### Backend integrity check
+
+This query proves the stored data is internally consistent: it uses Elasticsearch
+**`runtime_mappings`** to recompute the `threatScore` on the fly from each document's own
+fields (severity + action base scores, `+15` sensitive-path bonus, `+15` repeat-offender
+bonus, capped at 100), then filters for any document where the freshly recomputed score does
+**not** match the stored `threatScore`. A healthy index returns **zero hits** — every stored
+score reproduces exactly from its inputs.
+
+```bash
+curl --location --request GET 'http://localhost:9200/security-events/_search' \
+--header 'Content-Type: application/json' \
+--data '{
+  "runtime_mappings": {
+    "recomputedThreatScore": {
+      "type": "long",
+      "script": {
+        "source": "int score = 0; String sev = doc['\''ruleSeverity'\''].size() > 0 ? doc['\''ruleSeverity'\''].value : '\'''\''; if (sev == '\''CRITICAL'\'') score += 40; else if (sev == '\''HIGH'\'') score += 30; else if (sev == '\''MEDIUM'\'') score += 20; else if (sev == '\''LOW'\'') score += 10; String act = doc['\''ruleAction'\''].size() > 0 ? doc['\''ruleAction'\''].value : '\'''\''; if (act == '\''DENY'\'') score += 20; else if (act == '\''ALERT'\'') score += 10; String p = doc['\''path.keyword'\''].size() > 0 ? doc['\''path.keyword'\''].value.toLowerCase() : '\'''\''; if (p.contains('\''/admin'\'') || p.contains('\''/login'\'')) score += 15; if (doc['\''repeatOffender'\''].size() > 0 && doc['\''repeatOffender'\''].value) score += 15; if (score > 100) score = 100; emit(score);"
+      }
+    }
+  },
+  "query": {
+    "bool": {
+      "filter": {
+        "script": {
+          "script": { "source": "doc['\''threatScore'\''].value != doc['\''recomputedThreatScore'\''].value" }
+        }
+      }
+    }
+  },
+  "_source": ["eventId", "clientIp", "path", "ruleSeverity", "ruleAction", "threatScore", "repeatOffender"],
+  "fields": ["recomputedThreatScore"],
+  "size": 100
+}'
+```
+
+> The recompute script mirrors the scoring weights in `wsa-policies.yml`. If you tune those
+> weights, update the script accordingly (or expect it to surface the difference — which is
+> exactly the point of the check).
+
+The same invariant is enforced automatically in CI by the golden-master regression test
+(`RepeatOffenderGoldenMasterTest`), which ingests `data/events.csv` and asserts every stored
+event matches a checked-in expected-output snapshot field by field.
+
+---
+
 ## Configuration reference
 
 Infrastructure connection settings (overridable via environment variables):
@@ -356,3 +444,34 @@ Infrastructure connection settings (overridable via environment variables):
 
 Business policy (attack categories, threat-scoring weights, rate-limit window/threshold)
 lives in `src/main/resources/wsa-policies.yml` and is tunable without a code change.
+
+---
+
+## Production Readiness / Next Steps
+
+MiniWSA is intentionally a single deployable for reviewability. The roadmap below outlines how
+it would scale out to a production, high-throughput deployment:
+
+- **Microservices split** — decouple the monolith into 3 independently deployable and scalable
+  services: **Ingestion**, **Enrichment**, and **Query/Read**. Each scales on its own load
+  profile (ingest spikes, enrichment CPU, read fan-out).
+
+- **Event streaming** — replace the internal in-memory queues (the per-IP `KeyedExecutor`
+  lanes) with a **Kafka topic**, partitioned by client IP. This preserves the current per-IP
+  ordering guarantee across a cluster and provides durability, back-pressure, and replay.
+
+- **Localized in-memory caching** *(optional but recommended)* — exploit the Kafka
+  partition-by-IP layout to hold the IP rate-tracker state **in-memory within the specific pod
+  handling that partition**, removing the Redis round-trip from the hot path. When a pod meets
+  an unrecognized IP (e.g. after a rebalance), it falls back to checking Elasticsearch first to
+  rehydrate that IP's recent history.
+
+- **Tenant-aware tracking** — change the rate-tracker state key from just `ip` to
+  `configId + ip → [timestamps]`, so per-IP windows are scoped per tenant/configuration rather
+  than shared globally.
+
+- **Logic refinement** — exclude events triggered by `RATE_LIMITER` from receiving the
+  `repeatOffender` score bonus (avoid double-counting rate-limit signals as repeat offenses).
+
+- **Dynamic scoring** — allow different score weights per `configId`, so each configuration can
+  tune the contribution of specific attributes to the threat score.
