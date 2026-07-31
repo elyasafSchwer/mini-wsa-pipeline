@@ -30,3 +30,12 @@ spring:
     uris: ${ELASTICSEARCH_URIS:http://localhost:9200}
     connection-timeout: 2s
     socket-timeout: 5s
+
+# Storage tuning. Enriched events are buffered and written to Elasticsearch in bulk
+# (_bulk) rather than one document per event. A batch is flushed when it reaches
+# `batch-size` documents OR `flush-interval-ms` elapses — whichever comes first — so
+# throughput is high while indexing latency stays bounded under low traffic.
+wsa:
+  storage:
+    batch-size: ${WSA_STORAGE_BATCH_SIZE:500}
+    flush-interval-ms: ${WSA_STORAGE_FLUSH_INTERVAL_MS:1000}
